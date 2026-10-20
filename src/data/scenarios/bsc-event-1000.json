@@ -1,0 +1,18 @@
+{
+  "id": "bsc-event-1000",
+  "label": "1,000-person RSVP'd event at BSC (7–10 PM)",
+  "description": "The headline scenario: a sold-out student event at the Busch Student Center. ~72% of RSVPs show up, arriving across the 30 minutes before doors and leaving in a wave after the last act. Watch the B/A/H stops on Busch fill, the buses turn red, and the left-behind counter climb.",
+  "events": [
+    {
+      "kind": "event_surge",
+      "id": "bsc-1000-arrivals",
+      "stop": "bsc",
+      "attendees": 1000,
+      "startMin": 1140,
+      "endMin": 1320,
+      "showRate": 0.72,
+      "arrivalSpreadMin": 45,
+      "egressSpreadMin": 35
+    }
+  ]
+}

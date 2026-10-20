@@ -1,0 +1,25 @@
+{
+  "id": "game-day",
+  "label": "Football game day — SHI Stadium (5:30 PM kickoff)",
+  "description": "8,000 ticket-holders (~62% show up) pour into SHI Stadium before a 5:30 PM kickoff and leave together after. The C shuttle (Hill–Stadium–ARC) gets four extra buses an hour before the surge.",
+  "events": [
+    {
+      "kind": "fleet_add",
+      "id": "game-day-c-shuttle",
+      "route": "C",
+      "buses": 4,
+      "atMin": 1020
+    },
+    {
+      "kind": "event_surge",
+      "id": "game-day-surge",
+      "stop": "stadium",
+      "attendees": 8000,
+      "startMin": 1050,
+      "endMin": 1260,
+      "showRate": 0.62,
+      "arrivalSpreadMin": 120,
+      "egressSpreadMin": 45
+    }
+  ]
+}

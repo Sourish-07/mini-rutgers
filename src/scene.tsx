@@ -4,7 +4,8 @@ import { Html, OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
 import { FRAME } from './ground'
 import satelliteUrl from './data/satellite.jpg'
-import { ROUTES, STOPS, type Agent, type Bus, type Sim } from './sim'
+import { AGENT_CAP, ROUTES, STOPS, type Agent, type Bus, type Sim } from './sim'
+import { ROUTE_OF, liveToScene, type LiveVehicle } from './live'
 import { figureTextures, FIGURE_ASPECT, POSES, VARIANTS } from './atlas'
 
 const M = 50
@@ -322,7 +323,10 @@ function People({ agents, clock }: { agents: Agent[]; clock: { t: number } }) {
       const mesh = refs.current[i]
       if (!mesh) continue
       const list = buckets[i]
-      for (let k = 0; k < list.length; k++) {
+      // AGENT_CAP instances are allocated up front so scenario surges can grow
+      // the crowd past the initial population without remounting the meshes
+      const n = Math.min(list.length, AGENT_CAP)
+      for (let k = 0; k < n; k++) {
         const a = list[k]
         const x = a.px + (a.x - a.px) * f
         const z = a.pz + (a.z - a.pz) * f
@@ -332,12 +336,8 @@ function People({ agents, clock }: { agents: Agent[]; clock: { t: number } }) {
         dummy.updateMatrix()
         mesh.setMatrixAt(k, dummy.matrix)
       }
-      const count = mesh.instanceMatrix.count
-      dummy.scale.set(0.00001, 0.00001, 1)
-      dummy.updateMatrix()
-      for (let k = list.length; k < count; k++) mesh.setMatrixAt(k, dummy.matrix)
       mesh.instanceMatrix.needsUpdate = true
-      mesh.count = count
+      mesh.count = n
     }
   })
 
@@ -350,7 +350,7 @@ function People({ agents, clock }: { agents: Agent[]; clock: { t: number } }) {
             ref={(el) => {
               refs.current[v * POSES.length + p] = el
             }}
-            args={[undefined, undefined, agents.length]}
+            args={[undefined, undefined, AGENT_CAP]}
             frustumCulled={false}
             renderOrder={4}
           >
@@ -365,6 +365,59 @@ function People({ agents, clock }: { agents: Agent[]; clock: { t: number } }) {
           </instancedMesh>
         )),
       )}
+    </>
+  )
+}
+
+/** the scenario event marker: an amber pulse ring over the venue stop */
+function EventMarker({ at, label }: { at: [number, number]; label: string }) {
+  const ring = useRef<THREE.Mesh>(null)
+  useFrame(({ clock: c }) => {
+    if (!ring.current) return
+    const p = (c.elapsedTime % 1.6) / 1.6
+    const s = 1 + p * 2.4
+    ring.current.scale.set(s, s, s)
+    ;(ring.current.material as THREE.MeshBasicMaterial).opacity = 0.6 * (1 - p)
+  })
+  return (
+    <group position={[at[0], 0, at[1]]}>
+      <mesh ref={ring} rotation-x={-Math.PI / 2} position={[0, 0.08, 0]}>
+        <ringGeometry args={[m(26), m(30), 48]} />
+        <meshBasicMaterial color="#f59e0b" transparent opacity={0.6} side={THREE.DoubleSide} />
+      </mesh>
+      <mesh rotation-x={-Math.PI / 2} position={[0, 0.07, 0]}>
+        <circleGeometry args={[m(7), 24]} />
+        <meshBasicMaterial color="#f59e0b" transparent opacity={0.45} />
+      </mesh>
+      <Html position={[0, m(16), 0]} center zIndexRange={[10, 0]} style={{ pointerEvents: 'none' }}>
+        <div className="whitespace-nowrap rounded bg-amber-500/90 px-1.5 py-0.5 text-[9px] font-bold text-white shadow">
+          {label}
+        </div>
+      </Html>
+    </group>
+  )
+}
+
+/** live vehicles from the real Rutgers tracker, overlaid on the twin */
+function LiveLayer({ vehicles }: { vehicles: LiveVehicle[] }) {
+  return (
+    <>
+      {vehicles.map((v) => {
+        const [x, z] = liveToScene(v.lat, v.lng)
+        const colour = ROUTES.find((r) => r.ref === (ROUTE_OF[v.route] ?? v.route))?.colour ?? '#64748b'
+        return (
+          <group key={v.id} position={[x, 0, z]}>
+            <mesh position={[0, m(7), 0]}>
+              <sphereGeometry args={[m(5), 12, 12]} />
+              <meshBasicMaterial color={colour} />
+            </mesh>
+            <mesh rotation-x={-Math.PI / 2} position={[0, 0.09, 0]}>
+              <ringGeometry args={[m(7), m(8.5), 24]} />
+              <meshBasicMaterial color={colour} transparent opacity={0.7} />
+            </mesh>
+          </group>
+        )
+      })}
     </>
   )
 }
@@ -398,6 +451,8 @@ export function Scene({
   clock,
   speed,
   focus,
+  eventStop,
+  vehicles,
   onCamera,
 }: {
   sim: Sim
@@ -405,6 +460,10 @@ export function Scene({
   speed: number
   /** stop key to open on */
   focus: string
+  /** stop key the active scenario anchors to, for the event marker */
+  eventStop?: string | null
+  /** live Rutgers tracker vehicles to overlay */
+  vehicles?: LiveVehicle[]
   onCamera?: (c: THREE.Camera) => void
 }) {
   const { camera } = useThree()
@@ -437,6 +496,8 @@ export function Scene({
       <directionalLight position={[60, 90, 50]} intensity={2.0} color="#fff6e5" />
       <Ground />
       <Stops />
+      {eventStop && STOPS[eventStop] && <EventMarker at={STOPS[eventStop].at} label="EVENT" />}
+      {vehicles && vehicles.length > 0 && <LiveLayer vehicles={vehicles} />}
       <Buildings data={campus} />
       {sim.buses.map((b, i) => (
         <BusMesh key={i} bus={b} clock={clock} />
