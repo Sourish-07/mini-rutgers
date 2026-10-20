@@ -8,8 +8,10 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "check:layout": "node scripts/check-layout.mjs",
-    "check:sim": "node scripts/check-sim.mjs",
+    "check:layout": "node scripts/check/check-layout.mjs",
+    "check:sim": "node scripts/check/check-sim.mjs",
+    "check:mind": "node scripts/check/check-mind.mjs",
+    "build:data": "node scripts/build/build-places-v2.mjs && node scripts/build/build-schedule.mjs && node scripts/build/build-streets.mjs && node scripts/build/build-baseline.mjs",
     "format": "prettier --write src scripts",
     "format:check": "prettier --check src scripts"
   },

@@ -1,0 +1,63 @@
+{
+  "_comment": "Real Rutgers dining venues on/near the College Avenue campus, transcribed from dining.rutgers.edu/places-to-eat (fall 2026 hours). Times are sim minutes since 07:00 START. Prices in integer cents (guest prices; meal-plan holders swipe instead). Coordinates are picked by snapping to the building centroid in places-v2.json.",
+  "venues": [
+    {
+      "id": "dine_brower",
+      "placeId": "b3085",
+      "name": "Brower Commons",
+      "kind": "hall",
+      "open": 0,
+      "close": 840,
+      "mealSwipe": true,
+      "priceCents": 985,
+      "servicePerMin": 10,
+      "eatMin": 22,
+      "nutrition": 85
+    },
+    {
+      "id": "dine_harvest",
+      "placeId": "b3133",
+      "name": "Harvest Juice Bar (Student Center)",
+      "kind": "retail",
+      "open": 180,
+      "close": 510,
+      "mealSwipe": true,
+      "priceCents": 625,
+      "servicePerMin": 3,
+      "eatMin": 12,
+      "nutrition": 40
+    },
+    {
+      "id": "dine_knightwagon",
+      "placeId": "b3107",
+      "name": "Knight Wagon (CAC Tuesdays — by Alexander Library)",
+      "kind": "truck",
+      "open": 300,
+      "close": 540,
+      "mealSwipe": true,
+      "priceCents": 850,
+      "servicePerMin": 4,
+      "eatMin": 15,
+      "nutrition": 60,
+      "_note": "real weekly rotation: the Knight Wagon sits on College Avenue by Alexander Library on Tuesdays — the seeded truck is real Rutgers operations"
+    }
+  ],
+  "study": [
+    {
+      "id": "study_alx",
+      "placeId": "b3107",
+      "name": "Alexander Library",
+      "open": 60,
+      "close": 1020
+    }
+  ],
+  "gym": [
+    {
+      "id": "gym_cag",
+      "placeId": "b3097",
+      "name": "College Avenue Gym",
+      "open": 60,
+      "close": 870
+    }
+  ]
+}
