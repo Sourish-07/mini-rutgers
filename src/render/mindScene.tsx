@@ -21,10 +21,13 @@ export function MindPeople({
   mind,
   clock,
   onSelect,
+  limit,
 }: {
   mind: Mind
   clock: { t: number }
   onSelect: (id: number) => void
+  /** max figures to draw, drawn from the whole cohort in id order */
+  limit: number
 }) {
   const { camera, size } = useThree()
   const tex = useMemo(() => figureTextures(), [])
@@ -48,6 +51,7 @@ export function MindPeople({
     let k = 0
     for (const s of mind.students) {
       if (!visibleState(s)) continue
+      if (k >= limit) break // render cap — the engine still simulates everyone
       ids.push(s.id)
       const x = s.prev[0] + (s.pos[0] - s.prev[0]) * f
       const z = s.prev[1] + (s.pos[1] - s.prev[1]) * f

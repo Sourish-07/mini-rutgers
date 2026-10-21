@@ -299,7 +299,7 @@ function atDistance(bus: Bus, distance: number): [number, number] {
  * alternates while walking so legs swing: a painted figure reads at 8 px, a
  * capsule does not.
  */
-function People({ agents, clock }: { agents: Agent[]; clock: { t: number } }) {
+function People({ agents, clock, limit }: { agents: Agent[]; clock: { t: number }; limit: number }) {
   const { camera, size } = useThree()
   const tex = useMemo(() => figureTextures(), [])
   const refs = useRef<(THREE.InstancedMesh | null)[]>([])
@@ -314,11 +314,14 @@ function People({ agents, clock }: { agents: Agent[]; clock: { t: number } }) {
     const H = Math.max(m(1.75), unitsAcross * 0.017)
     const W = H * FIGURE_ASPECT
     const buckets: Agent[][] = Array.from({ length: VARIANTS * POSES.length }, () => [])
+    let drawn = 0
     for (const a of agents) {
-      if (a.state === 'ride') continue
+      if (drawn >= limit) break // render cap — the engine still simulates everyone
+      if (a.state === 'ride') continue // bus riders ride inside the bus mesh
       const moving = a.state === 'walk-stop' || a.state === 'walk-dest'
       const pose = moving ? (stride ? 1 : 2) : 0
       buckets[(a.id % VARIANTS) * POSES.length + pose].push(a)
+      drawn++
     }
     for (let i = 0; i < buckets.length; i++) {
       const mesh = refs.current[i]
@@ -404,6 +407,8 @@ export const Scene = memo(function Scene({
   selected,
   onSelect,
   onCamera,
+  mindLimit,
+  simLimit,
 }: {
   sim: Sim
   mind: Mind
@@ -414,6 +419,10 @@ export const Scene = memo(function Scene({
   selected: number | null
   onSelect: (id: number) => void
   onCamera?: (c: THREE.Camera) => void
+  /** max minded-student figures to draw (of the full cohort) */
+  mindLimit: number
+  /** max commuter figures to draw (of the full transit population) */
+  simLimit: number
 }) {
   const { camera } = useThree()
   const campus = useCampus()
@@ -453,8 +462,8 @@ export const Scene = memo(function Scene({
       {sim.buses.map((b, i) => (
         <BusMesh key={i} bus={b} clock={clock} />
       ))}
-      <People agents={sim.agents} clock={clock} />
-      <MindPeople mind={mind} clock={clock} onSelect={onSelect} />
+      <People agents={sim.agents} clock={clock} limit={simLimit} />
+      <MindPeople mind={mind} clock={clock} onSelect={onSelect} limit={mindLimit} />
       <Barriers mind={mind} />
       <SelectionMarker mind={mind} selected={selected} clock={clock} />
       <Trucks mind={mind} />

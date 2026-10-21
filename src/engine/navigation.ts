@@ -11,12 +11,16 @@ const adj = new Map<string, { to: string; cost: number; pt: P }[]>()
 const nodes = new Map<string, P>()
 
 for (const e of (net as unknown as { edges: Edge[] }).edges) {
-  if (!e.walk) continue
+  if (!e.walk && !e.drive) continue
   const ka = key(e.a as P)
   const kb = key(e.b as P)
   nodes.set(ka, e.a as P)
   nodes.set(kb, e.b as P)
-  const cost = Math.hypot(e.a[0] - e.b[0], e.a[1] - e.b[1])
+  // walkers prefer footpaths, but can use a road — so a building across a
+  // river is still reachable across the real bridge instead of via a straight
+  // line over the water
+  const len = Math.hypot(e.a[0] - e.b[0], e.a[1] - e.b[1])
+  const cost = len * (e.walk ? 1 : 1.5)
   if (!adj.has(ka)) adj.set(ka, [])
   if (!adj.has(kb)) adj.set(kb, [])
   adj.get(ka)!.push({ to: kb, cost, pt: e.b as P })
@@ -25,17 +29,38 @@ for (const e of (net as unknown as { edges: Edge[] }).edges) {
 
 const nodeList = [...nodes.entries()]
 
+/* spatial hash so snapping 12k building centroids stays O(1) */
+const CELL = 2
+const grid = new Map<string, string[]>()
+for (const [k, p] of nodeList) {
+  const c = `${Math.floor(p[0] / CELL)},${Math.floor(p[1] / CELL)}`
+  if (!grid.has(c)) grid.set(c, [])
+  grid.get(c)!.push(k)
+}
+
 function snap(p: P): string {
+  const cx = Math.floor(p[0] / CELL)
+  const cz = Math.floor(p[1] / CELL)
   let best = ''
   let bd = Infinity
-  for (const [k, q] of nodeList) {
-    const d = (q[0] - p[0]) ** 2 + (q[1] - p[1]) ** 2
-    if (d < bd) {
-      bd = d
-      best = k
+  const scan = (bucket?: string[]) => {
+    for (const k of bucket ?? []) {
+      const q = nodes.get(k)!
+      const d = (q[0] - p[0]) ** 2 + (q[1] - p[1]) ** 2
+      if (d < bd) {
+        bd = d
+        best = k
+      }
     }
   }
+  for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) scan(grid.get(`${cx + dx},${cz + dz}`))
+  if (!best) scan(nodeList.map(([k]) => k))
   return best
+}
+
+/** the nearest point on the walk/road network — where a commuter stands */
+export function nearestNode(p: P): P {
+  return nodes.get(snap(p))!
 }
 
 export function pathLength(path: P[]): number {
@@ -82,8 +107,10 @@ export function walkRoute(from: P, to: P): P[] {
   const start = snap(from)
   const goal = snap(to)
   let out: P[]
-  if (!start || !goal || start === goal) {
-    out = [from, to]
+  if (!start || !goal) {
+    out = [] // no network to stand on
+  } else if (start === goal) {
+    out = [nodes.get(start)!] // already there — stand on the network, not the raw point
   } else {
     const [gx, gz] = nodes.get(goal)!
     const g = new Map<string, number>([[start, 0]])
@@ -107,7 +134,7 @@ export function walkRoute(from: P, to: P): P[] {
       }
     }
     if (!came.has(goal)) {
-      out = [from, to]
+      out = [] // unroutable — NEVER a straight line (that is how people end up in the river)
     } else {
       const rev: P[] = [nodes.get(goal)!]
       let cur = goal
@@ -116,7 +143,7 @@ export function walkRoute(from: P, to: P): P[] {
         rev.push(nodes.get(cur)!)
       }
       rev.reverse()
-      out = [from, ...rev, to]
+      out = rev // every point on the network
     }
   }
   memo.set(mk, out)

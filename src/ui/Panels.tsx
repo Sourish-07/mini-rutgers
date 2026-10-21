@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Line, LineChart, ReferenceLine, ResponsiveContainer, YAxis } from 'recharts'
 import { CAPACITY, ROUTES, STOPS, type Sim } from '../engine/sim'
+import type { Mind } from '../engine/mind/engine.ts'
 
 const fmt = (min: number) => {
   const t = Math.floor(min) % 1440
@@ -10,72 +11,140 @@ const fmt = (min: number) => {
 /** the ten 5G nodes: one per major stop, each reporting how many people are standing there */
 const NODES = ['arc', 'bsc', 'livSc', 'cas', 'quads', 'hill', 'science', 'yard', 'biel', 'redoak']
 
+/** agent-count control: sliders for how many students and commuters are drawn.
+ *  The engines always simulate the full population; the sliders change only how
+ *  many figures are rendered, and the readouts state exactly what is real. */
+export function AgentMenu({
+  mind,
+  sim,
+  mindLimit,
+  setMindLimit,
+  simLimit,
+  setSimLimit,
+  mindOutdoors,
+  simOnFoot,
+}: {
+  mind: Mind
+  sim: Sim
+  mindLimit: number
+  setMindLimit: (n: number) => void
+  simLimit: number
+  setSimLimit: (n: number) => void
+  /** students currently outdoors (travel/queue) — what the first tier can draw */
+  mindOutdoors: number
+  /** commuters not riding a bus — what the transit tier can draw */
+  simOnFoot: number
+}) {
+  const SLIDER =
+    'h-1.5 w-full cursor-pointer appearance-none rounded-full bg-slate-200 accent-slate-900'
+  const mindDrawn = Math.min(mindLimit, mindOutdoors)
+  const simDrawn = Math.min(simLimit, simOnFoot)
+
+  return (
+    <div className="pointer-events-auto w-[20rem] rounded-2xl border border-white/60 bg-white/75 px-3 py-2 shadow-xl shadow-slate-900/5 backdrop-blur-xl">
+      <div className="mb-1.5 flex items-center justify-between">
+        <h2 className="text-[11px] font-semibold uppercase tracking-widest text-slate-500">Agents</h2>
+        <span className="text-[9px] text-slate-400">simulation-sized, render-capped</span>
+      </div>
+
+      <div className="flex items-baseline justify-between text-[10px] text-slate-600">
+        <span>minded students</span>
+        <span className="tabular-nums">
+          <b className="text-slate-900">{mindDrawn}</b> outdoors now · showing {mindLimit} of{' '}
+          {mind.students.length}
+        </span>
+      </div>
+      <input
+        type="range"
+        min={0}
+        max={mind.students.length}
+        step={5}
+        value={mindLimit}
+        onChange={(e) => setMindLimit(Number(e.target.value))}
+        className={SLIDER}
+      />
+
+      <div className="mt-2 flex items-baseline justify-between text-[10px] text-slate-600">
+        <span>commuters</span>
+        <span className="tabular-nums">
+          <b className="text-slate-900">{simDrawn}</b> on foot now · showing {simLimit} of{' '}
+          {sim.agents.length}
+        </span>
+      </div>
+      <input
+        type="range"
+        min={0}
+        max={sim.agents.length}
+        step={250}
+        value={simLimit}
+        onChange={(e) => setSimLimit(Number(e.target.value))}
+        className={SLIDER}
+      />
+    </div>
+  )
+}
+
+/** the header bar: title, agent menu, clock and playback controls */
 export function Panels({
   sim,
-  clock,
   speed,
   setSpeed,
   running,
   setRunning,
+  children,
 }: {
   sim: Sim
-  clock: { t: number }
   speed: number
   setSpeed: (n: number) => void
   running: boolean
   setRunning: (b: boolean) => void
+  children?: ReactNode
 }) {
-  const minute = Math.floor(clock.t)
+  return (
+    <header className="pointer-events-none absolute inset-x-0 top-0 z-30 flex items-start justify-between gap-4 p-4">
+      {children && <div className="flex flex-1 justify-center">{children}</div>}
+      <div className="pointer-events-auto rounded-2xl border border-white/60 bg-white/75 px-4 py-3 shadow-xl shadow-slate-900/5 backdrop-blur-xl">
+        <div className="flex items-center gap-2">
+          <span className="grid h-6 w-6 place-items-center rounded-lg bg-[#ee0000] text-[11px] font-black text-white">
+            R
+          </span>
+          <h1 className="text-sm font-semibold tracking-tight text-slate-900">Rutgers 5G Transit Twin</h1>
+        </div>
+        <p className="mt-0.5 text-[11px] text-slate-500">
+          Powered by Verizon Mobile Edge Compute · simulated telemetry
+        </p>
+      </div>
+
+      <div className="pointer-events-auto flex items-center gap-2 rounded-2xl border border-white/60 bg-white/75 px-3 py-2 shadow-xl shadow-slate-900/5 backdrop-blur-xl">
+        <span className="text-sm font-semibold tabular-nums text-slate-900">{fmt(sim.minute)}</span>
+        <button
+          onClick={() => setRunning(!running)}
+          className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[10px] font-semibold text-slate-600"
+        >
+          {running ? 'Pause' : 'Play'}
+        </button>
+        {[1, 10, 60, 240].map((s) => (
+          <button
+            key={s}
+            onClick={() => setSpeed(s)}
+            className={`rounded-md px-1.5 py-1 text-[10px] font-semibold ${
+              speed === s ? 'bg-slate-900 text-white' : 'border border-slate-200 bg-white text-slate-600'
+            }`}
+          >
+            {s}x
+          </button>
+        ))}
+      </div>
+    </header>
+  )
+}
+
+export function Sensors({ sim }: { sim: Sim }) {
   const stats = sim.stats()
   const queue = (k: string) => (sim.queue[k] ?? []).length
-  const busiest = NODES.reduce((a, b) => (queue(a) >= queue(b) ? a : b))
-  const [picked, setPicked] = useState<string | null>(null)
-  const watch = picked ?? busiest
-  const history = sim.history[watch] ?? []
-  const series = history
-    .slice(-90)
-    .map((waiting, i) => ({ t: fmt(minute - (Math.min(90, history.length) - 1 - i)), waiting }))
-  const peak = Math.max(1, ...series.map((p) => p.waiting))
 
   return (
-    <>
-      <header className="pointer-events-none absolute inset-x-0 top-0 z-30 flex items-start justify-between gap-4 p-4">
-        <div className="pointer-events-auto rounded-2xl border border-white/60 bg-white/75 px-4 py-3 shadow-xl shadow-slate-900/5 backdrop-blur-xl">
-          <div className="flex items-center gap-2">
-            <span className="grid h-6 w-6 place-items-center rounded-lg bg-[#ee0000] text-[11px] font-black text-white">
-              R
-            </span>
-            <h1 className="text-sm font-semibold tracking-tight text-slate-900">Rutgers 5G Transit Twin</h1>
-          </div>
-          <p className="mt-0.5 text-[11px] text-slate-500">
-            Powered by Verizon Mobile Edge Compute · simulated telemetry
-          </p>
-        </div>
-
-        <div className="pointer-events-auto flex items-center gap-2 rounded-2xl border border-white/60 bg-white/75 px-3 py-2 shadow-xl shadow-slate-900/5 backdrop-blur-xl">
-          <span className="text-sm font-semibold tabular-nums text-slate-900">{fmt(sim.minute)}</span>
-          <button
-            onClick={() => setRunning(!running)}
-            className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[10px] font-semibold text-slate-600"
-          >
-            {running ? 'Pause' : 'Play'}
-          </button>
-          {[1, 10, 60, 240].map((s) => (
-            <button
-              key={s}
-              onClick={() => setSpeed(s)}
-              className={`rounded-md px-1.5 py-1 text-[10px] font-semibold ${
-                speed === s ? 'bg-slate-900 text-white' : 'border border-slate-200 bg-white text-slate-600'
-              }`}
-            >
-              {s}x
-            </button>
-          ))}
-        </div>
-      </header>
-
-      {/* sensors */}
-      <aside className="absolute left-4 top-28 z-20 w-[16.5rem] space-y-2">
+    <aside className="w-full space-y-2">
         <section className="rounded-2xl border border-white/60 bg-white/75 p-3 shadow-xl shadow-slate-900/5 backdrop-blur-xl">
           <div className="mb-2 flex items-center justify-between">
             <h2 className="text-[11px] font-semibold uppercase tracking-widest text-slate-500">
@@ -128,10 +197,26 @@ export function Panels({
             {ROUTES.length} routes · capacity ~{CAPACITY} per bus (randomised) · modelled, not measured
           </p>
         </section>
-      </aside>
+    </aside>
+  )
+}
 
-      {/* prediction */}
-      <aside className="absolute right-4 top-28 z-20 w-[19rem] space-y-2">
+/** the waiting-time prediction chart and the volume alert for the busiest stop */
+export function Prediction({ sim, clock }: { sim: Sim; clock: { t: number } }) {
+  const minute = Math.floor(clock.t)
+  const stats = sim.stats()
+  const queue = (k: string) => (sim.queue[k] ?? []).length
+  const busiest = NODES.reduce((a, b) => (queue(a) >= queue(b) ? a : b))
+  const [picked, setPicked] = useState<string | null>(null)
+  const watch = picked ?? busiest
+  const history = sim.history[watch] ?? []
+  const series = history
+    .slice(-90)
+    .map((waiting, i) => ({ t: fmt(minute - (Math.min(90, history.length) - 1 - i)), waiting }))
+  const peak = Math.max(1, ...series.map((p) => p.waiting))
+
+  return (
+    <aside className="w-full space-y-2">
         <section className="rounded-2xl border border-white/60 bg-white/75 p-3 shadow-xl shadow-slate-900/5 backdrop-blur-xl">
           <div className="mb-1 flex items-baseline justify-between">
             <h2 className="text-[11px] font-semibold uppercase tracking-widest text-slate-500">Prediction</h2>
@@ -182,7 +267,6 @@ export function Panels({
             Reserve fleet (sim)
           </button>
         </section>
-      </aside>
-    </>
+    </aside>
   )
 }

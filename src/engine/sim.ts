@@ -8,7 +8,7 @@ import stopsData from '../data/stops.json' with { type: 'json' }
 import routesData from '../data/routes.json' with { type: 'json' }
 import pathsData from '../data/paths.json' with { type: 'json' }
 import placesData from '../data/places.json' with { type: 'json' }
-import { pathLength, samplePath, walkRoute, type P } from './navigation.ts'
+import { pathLength, samplePath, walkRoute, nearestNode, type P } from './navigation.ts'
 
 export type StopKey = keyof typeof stopsData
 export type Stop = { label: string; lat: number; lon: number; at: P }
@@ -176,11 +176,13 @@ export function createSim(opts: { population?: number; seed?: number } = {}) {
   const agents: Agent[] = []
   for (let i = 0; i < population; i++) {
     const from = places.length ? pick(places) : { x: 0, z: 0, s: pick(stopKeys) }
-    const home: [number, number] = [from.x, from.z]
+    // stand ON the path network: a raw building centroid can sit 50 m from any
+    // footway, which looks like a person floating over the map
+    const home: [number, number] = nearestNode([from.x, from.z])
     const homeKey = from.s
     // most people leave home once and come back; the rest stay put
     const to = places.length && rand() >= 0.25 ? pick(places) : from
-    const dest: [number, number] = [to.x, to.z]
+    const dest: [number, number] = nearestNode([to.x, to.z])
     const destKey = to.s
     agents.push({
       id: i,
@@ -243,6 +245,7 @@ export function createSim(opts: { population?: number; seed?: number } = {}) {
 
   function walkLeg(from: P, to: P, t0: number) {
     const path = walkRoute(from, to)
+    if (!path.length) return null // unroutable — stay put rather than cut a straight line
     return { path, t0, t1: t0 + Math.max(1, pathLength(path) / WALK_SPEED) }
   }
 
@@ -278,12 +281,19 @@ export function createSim(opts: { population?: number; seed?: number } = {}) {
         for (const id of b.riders) {
           const a = agents[id]
           if (a.destStop === key) {
-            a.state = 'walk-dest'
-            a.since = t
+            const leg = walkLeg(STOPS[key].at, a.dest, t)
             a.bus = -1
             a.x = STOPS[key].at[0]
             a.z = STOPS[key].at[1]
-            a.leg = walkLeg([a.x, a.z], a.dest, t)
+            if (leg) {
+              a.state = 'walk-dest'
+              a.since = t
+              a.leg = leg
+            } else {
+              // no walkable way to the destination from here — wait at the stop
+              a.state = 'at-dest'
+              a.since = t
+            }
           } else staying.push(id)
         }
         b.riders = staying
@@ -313,9 +323,14 @@ export function createSim(opts: { population?: number; seed?: number } = {}) {
       switch (a.state) {
         case 'home': {
           if (t < a.due - 40) break
+          const leg = walkLeg([a.x, a.z], STOPS[a.stop].at, t)
+          if (!leg) {
+            a.due = t + 60 // nowhere walkable to today — retry in an hour
+            break
+          }
           a.state = 'walk-stop'
           a.since = t
-          a.leg = walkLeg([a.x, a.z], STOPS[a.stop].at, t)
+          a.leg = leg
           break
         }
         case 'walk-stop':
@@ -345,10 +360,15 @@ export function createSim(opts: { population?: number; seed?: number } = {}) {
           break
         case 'at-dest': {
           if (t - a.since < 45) break
+          const leg = walkLeg([a.x, a.z], a.home, t)
+          if (!leg) {
+            a.since = t // no way back on foot — linger another 45 min
+            break
+          }
           a.state = 'walk-dest'
           a.since = t
           a.dest = a.home
-          a.leg = walkLeg([a.x, a.z], a.home, t)
+          a.leg = leg
           break
         }
       }

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { Scene } from '../render/scene'
-import { Panels } from '../ui/Panels'
+import { Panels, Sensors, Prediction, AgentMenu } from '../ui/Panels'
 import { WhatIf, Inspector, Results } from '../ui/MindPanels'
 import { createSim } from '../engine/sim'
 import { createMind } from '../engine/mind/engine.ts'
@@ -26,6 +26,15 @@ export default function App() {
   }
   const sim = simRef.current
   const mind = mindRef.current
+  // render caps only — the engines always simulate the full populations; these
+  // start at "draw everything" and the header menu lets the user drag them down
+  const [mindLimit, setMindLimit] = useState(mind.students.length)
+  const [simLimit, setSimLimit] = useState(sim.agents.length)
+  // honest live counts — exactly how many are standing outdoors / on foot now
+  let mindOutdoors = 0
+  for (const s of mind.students) if (s.state === 'travel' || s.state === 'queue') mindOutdoors++
+  let simOnFoot = 0
+  for (const a of sim.agents) if (a.state !== 'ride') simOnFoot++
   const w = window as unknown as { __sim: unknown; __mind: unknown }
   w.__sim = sim
   w.__mind = mind
@@ -57,23 +66,39 @@ export default function App() {
           focus={focus}
           selected={selected}
           onSelect={setSelected}
+          mindLimit={mindLimit}
+          simLimit={simLimit}
         />
       </Canvas>
 
       <Panels
         sim={sim}
-        clock={clock}
         speed={speed}
         setSpeed={setSpeed}
         running={running}
         setRunning={setRunning}
-      />
+      >
+        <AgentMenu
+          mind={mind}
+          sim={sim}
+          mindLimit={mindLimit}
+          setMindLimit={setMindLimit}
+          simLimit={simLimit}
+          setSimLimit={setSimLimit}
+          mindOutdoors={mindOutdoors}
+          simOnFoot={simOnFoot}
+        />
+      </Panels>
 
-      <div className="absolute bottom-4 left-4 z-20 w-[16.5rem]">
+      {/* left column — stacked and scrollable so panels never overlap */}
+      <div className="pointer-events-auto absolute bottom-4 left-4 top-28 z-20 flex w-[16.5rem] flex-col gap-2 overflow-y-auto pb-1 pr-0.5">
+        <Sensors sim={sim} />
         <WhatIf mind={mind} clock={clock} />
       </div>
 
-      <div className="absolute right-4 top-24 z-20 flex w-[17rem] flex-col gap-2">
+      {/* right column — stacked and scrollable so panels never overlap */}
+      <div className="pointer-events-auto absolute bottom-4 right-4 top-24 z-20 flex w-[17rem] flex-col gap-2 overflow-y-auto pb-1 pr-0.5">
+        <Prediction sim={sim} clock={clock} />
         <Inspector mind={mind} selected={selected} setSelected={setSelected} />
         <Results mind={mind} clock={clock} />
       </div>
