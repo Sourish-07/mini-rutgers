@@ -3,31 +3,23 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "engines": {
-    "node": ">=22.18.0"
-  },
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "check:layout": "node scripts/check-layout.mjs",
-    "check:sim": "node scripts/check-sim.mjs",
-    "check:bus": "node scripts/check-bus.mjs",
-    "check:iso": "node scripts/check-iso.mjs",
-    "check:all": "node scripts/check-iso.mjs && node scripts/check-layout.mjs && npm run check:sim && npm run check:bus && npm test",
-    "test": "node --no-experimental-strip-types node_modules/vitest/vitest.mjs run",
-    "test:watch": "node --no-experimental-strip-types node_modules/vitest/vitest.mjs",
-    "format": "prettier --write src scripts tests",
-    "format:check": "prettier --check src scripts tests"
+    "check:layout": "node scripts/check/check-layout.mjs",
+    "check:sim": "node scripts/check/check-sim.mjs",
+    "check:mind": "node scripts/check/check-mind.mjs",
+    "build:data": "node scripts/build/build-places-v2.mjs && node scripts/build/build-land.mjs && node scripts/build/build-schedule.mjs && node scripts/build/build-streets.mjs && node scripts/build/build-baseline.mjs",
+    "format": "prettier --write src scripts",
+    "format:check": "prettier --check src scripts"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.9",
     "@react-three/fiber": "^9.8.2",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "react-is": "^19.3.1",
-    "recharts": "^3.10.1",
     "three": "^0.186.1"
   },
   "devDependencies": {
@@ -42,7 +34,6 @@
     "prettier": "^3.6.2",
     "tailwindcss": "^4.1.14",
     "typescript": "~6.0.2",
-    "vite": "8.3.2",
-    "vitest": "5.0.3"
+    "vite": "^8.3.0"
   }
 }

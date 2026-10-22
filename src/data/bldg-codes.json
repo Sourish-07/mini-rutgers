@@ -1,0 +1,29 @@
+{
+  "_comment": "SOC building codes (from sis.rutgers.edu/soc/api/courses.json meetingTimes.buildingCode) mapped to places-v2.json building ids. The ids are 'b'+BldgNum from the ArcGIS Rutgers_University_Buildings layer. Codes were identified by cross-referencing each code's real course mix against the CAC building inventory (counts = CAC Tuesday-section meetings, fall 2026).",
+  "codes": {
+    "SC":  { "placeId": "b3038", "name": "Scott Hall", "conf": "high", "meetings": 646 },
+    "MU":  { "placeId": "b3011", "name": "Murray Hall", "conf": "high", "meetings": 333 },
+    "ABW": { "placeId": "b3198", "name": "Rutgers Academic Building (West wing)", "conf": "high", "meetings": 289 },
+    "ABE": { "placeId": "b3198", "name": "Rutgers Academic Building (East wing)", "conf": "high", "meetings": 257 },
+    "HH":  { "placeId": "b3119", "name": "Hardenbergh Hall", "conf": "high", "meetings": 249 },
+    "FH":  { "placeId": "b3117", "name": "Frelinghuysen Hall", "conf": "high", "meetings": 186 },
+    "CI":  { "placeId": "b3134", "name": "School of Communication & Information", "conf": "high", "meetings": 140 },
+    "CA":  { "placeId": "b3138", "name": "191 College Avenue", "conf": "medium", "meetings": 87 },
+    "HC":  { "placeId": "b3197", "name": "Honors College", "conf": "high", "meetings": 68 },
+    "VH":  { "placeId": "b3013", "name": "Voorhees Hall / Zimmerli Art Museum", "conf": "high", "meetings": 57 },
+    "MI":  { "placeId": "b3103", "name": "Miller Hall", "conf": "medium", "meetings": 56 },
+    "ED":  { "placeId": "b3037", "name": "Graduate School of Education Building", "conf": "high", "meetings": 52 },
+    "VD":  { "placeId": "b3016", "name": "Van Dyck Hall", "conf": "high", "meetings": 38 },
+    "GTW": { "placeId": "b3178", "name": "Gateway Transit Village", "conf": "high", "meetings": 21 },
+    "MH":  { "placeId": "b3101", "name": "Bildner Center for the Study of Jewish Life", "conf": "medium", "meetings": 20 },
+    "ZAM": { "placeId": "b3013", "name": "Zimmerli Art Museum (in Voorhees Hall)", "conf": "high", "meetings": 12 },
+    "SEM": { "placeId": "b3017", "name": "Linguistics Department, 18 Seminary Place", "conf": "medium", "meetings": 11 },
+    "GH":  { "placeId": "b3002", "name": "Geology Hall", "conf": "high", "meetings": 7 },
+    "NJ":  { "placeId": "b3014", "name": "New Jersey Hall", "conf": "high", "meetings": 6 },
+    "HU":  { "placeId": "b3135", "name": "SC&I Annex A, 192 College Avenue", "conf": "low", "meetings": 5 },
+    "MK":  { "placeId": "b3045", "name": "McKinney Hall", "conf": "high", "meetings": 4 },
+    "EAS": { "placeId": "b3154", "name": "University Center at Easton Avenue", "conf": "low", "meetings": 2 },
+    "CAG": { "placeId": "b3097", "name": "College Avenue Gym", "conf": "high", "meetings": 1 },
+    "ALX": { "placeId": "b3107", "name": "Alexander Library", "conf": "high", "meetings": 1 }
+  }
+}

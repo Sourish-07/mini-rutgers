@@ -1,8 +1,0 @@
-# generated artifacts — their generators own the formatting, not prettier
-src/network.json
-src/data/paths.json
-src/data/places.json
-src/data/stops.json
-src/data/routes.json
-package-lock.json
-dist

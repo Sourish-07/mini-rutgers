@@ -1,2 +1,0 @@
-# provisioning secrets live only in flash, never in the repo
-secrets.h
