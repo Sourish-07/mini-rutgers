@@ -6,16 +6,30 @@ building footprints — and **levers to pull** (close a street, drop a food
 truck, schedule an event in a building) to see how the campus reacts *before*
 trying it in reality.
 
-Rendered as an isometric 3D scene (React + three.js) over real satellite
-imagery, with IoT-style stop telemetry, queue-prediction charts, a
-click-anyone student inspector, and a live results ledger that measures what
-your lever did against a deterministic baseline day.
+Rendered as an isometric 3D scene (React + three.js) on a **designed vector map**:
+landcover, roads and footways drawn from OpenStreetMap as real geometry, so the
+map stays sharp from 5 m to 5 km — no stretched photograph, which is what used to
+turn to mush the moment you zoomed in. The satellite image is still in the build
+as an optional aerial base layer (the `aerial` toggle, top right). Around it: stop
+telemetry, a queue forecast, a click-anyone student inspector, and a live results
+ledger that measures what your lever did against a deterministic baseline day.
 
-**What makes this different from a crowd visualizer:** every red figure on
-the College Avenue campus is an *individual* — with a name, a real Rutgers
-class schedule, a dorm, hunger, energy, stress, an RU Express balance and a
-personality — who makes a scored, explainable decision every time they move.
-Click one and read their reasoning, including the option they rejected.
+**What makes this different from a crowd visualizer:** every student is drawn as
+the same small walk-animated 3D figure — blocky, lit, and crisp at any zoom — and
+every scarlet one on the College Avenue campus is an *individual*: a name, a real
+Rutgers class schedule, a dorm, hunger, energy, stress, an RU Express balance and
+a personality, making a scored, explainable decision every time they move. Click
+one and read their reasoning, including the option they rejected.
+
+Two student populations share the map:
+
+| Population | Who they are | How they are drawn |
+|---|---|---|
+| **On-campus students** (420) | live in the College Avenue dorms; each one is simulated by the behavior engine with a real Tuesday schedule | scarlet shirts, clickable — the cohort you can interrogate |
+| **Off-campus students** (6,000) | commute in on the buses, walk to a destination, walk home | muted shirts, statistical background population |
+
+The two are the same renderer and the same 1.75 m scale; the colour is the only
+difference, and it is also the legend.
 
 ## Contents
 
@@ -51,10 +65,10 @@ No API keys, no .env, no server — everything the app needs is baked into
 
 ## The living quarter — a demo walkthrough
 
-Alongside the 6,000 statistical background students and 67 buses, **420
-"minded" students** live on the College Avenue campus. They are drawn as red
-figures (the background population uses the muted sprite palette) so you can
-watch the minds move through the crowd.
+Alongside the 6,000 statistical off-campus students and 67 buses, **420
+on-campus students** live in the College Avenue dorms. They wear scarlet (the
+background population wears muted colours) so you can watch the minds move
+through the crowd.
 
 ### 1. The What-if box (bottom-left)
 
@@ -77,11 +91,11 @@ can be placed at any building or landmark (try "the Yard").
 
 ### 2. The Inspector (top-right)
 
-Click any red figure (or press **Follow a walker**). You get:
+Click any scarlet figure (or press **Pick a student on the move**). You get:
 
-- **Persona** — name, archetype (freshman/sophomore/junior/senior/commuter/
-  grad), one-line backstory, walk pace, outgoing & diligence scores,
-  meal-plan status.
+- **Persona** — name, year (first-year → graduate; off-campus students are
+  labelled `off-campus`), one-line backstory, walk pace, outgoing & diligence
+  scores, meal-plan status.
 - **Needs bars** — hunger, energy, stress (0–100), live.
 - **RU Express balance** — integer cents; students who cannot afford a venue
   skip it, and the Results ledger stays exact.
@@ -110,8 +124,9 @@ a mid-day reading is honest rather than a comparison against a finished day:
 - a live **money-conservation check**: every student's spending summed
   equals venue revenue, to the cent (integer cents everywhere, never floats)
 
-Visual aids in the scene: a pulsing white ring tracks the inspected student,
-red barrier bars mark closed edges, truck meshes mark `place_add` venues.
+Visual aids in the scene: a pulsing scarlet ring and a light beacon track the
+inspected student (a 1.75 m figure is easy to lose on a 7 × 11 km map), scarlet
+bars mark closed edges, truck meshes mark `place_add` venues.
 
 ## Project layout
 
@@ -124,13 +139,17 @@ src/
     mind/         the behavior engine: cohort schedules, needs, decisions,
                   scenarios, dining queues, metrics (see docs/ARCHITECTURE.md)
   render/     three.js presentation
-    scene.tsx     the <Canvas> scene: buildings, buses, people, stops, camera
-    ground.ts     painted ground texture (grass, footways, roads, route ribbons)
-    atlas.ts      painted figure sprites (instanced billboards)
+    scene.tsx     the scene: vector ground, buildings, buses, people, stops, camera
+    ground.ts     the designed map — landcover polygons and road/footway ribbons
+                  built as geometry, so nothing is a stretched bitmap
+    people.tsx    the crowd: blocky instanced figures (7 draw calls for 6,000
+                  people) with a walk cycle, baked face shading, contact shadows
     iso.ts        shared 2:1 dimetric projection math (used by checks)
-    mindScene.tsx red cohort figures, closure barriers, trucks, selection ring
-  ui/         React overlay panels (Panels.tsx: sensors, stats, prediction;
-              MindPanels.tsx: What if…, Inspector, Results)
+    mindScene.tsx on-campus figures, closure barriers, trucks, selection marker
+  ui/         React overlay (theme.tsx design tokens; Panel.tsx primitives;
+              Panels.tsx: top bar, populations, telemetry, forecast, map labels,
+              legend, status strip; MindPanels.tsx: What if…, Inspector, Results;
+              Sparkline.tsx: the hand-drawn queue chart)
   data/       generated datasets — see docs/DATA_PIPELINE.md
 scripts/
   build/      regenerates the datasets (OSM graph, bus paths, places, satellite)
@@ -237,7 +256,8 @@ runtime API calls for its behavior data.
 | `streets.json` — 10 named street corridors | Nominatim (OSM geocoder), 1 req/s | street geometry for name-addressed closures |
 | `dining.json` — real venues & hours | hand-transcribed from dining.rutgers.edu | Brower Commons, Harvest Juice Bar, the Knight Wagon (which really parks by Alexander Library on Tuesdays), Alexander Library, College Ave Gym |
 | `baseline.json` — the no-lever day | computed locally by the same engine | final metrics + 114 cumulative 10-min buckets |
-| `satellite.jpg` | Esri World Imagery tiles, stitched | the 7 × 11 km ground plane |
+| `land.json` — water, green, pitches, paved lots | OpenStreetMap via Overpass (`scripts/build/build-land.mjs`) | polygons in scene units: simplified, area-capped, clipped to the frame. This is the designed ground layer — no runtime fetch |
+| `satellite.jpg` | Esri World Imagery tiles, stitched | the 7 × 11 km frame; now an optional aerial base layer, because one fixed resolution cannot survive a 50× zoom |
 
 Regenerate the behavior datasets with `npm run build:data` (needs network for
 ArcGIS/SIS/Nominatim; the baseline step is fully local). There is **no API
@@ -261,6 +281,7 @@ key anywhere in this project** — every source above is public and free.
 | `node scripts/build/build-network.mjs /tmp/osm_*.osm` | rebuild the routable graph |
 | `node scripts/build/build-paths.mjs` | rebuild route polylines on drivable roads |
 | `node scripts/build/build-places.mjs` | rebuild building centroids from ArcGIS |
+| `node scripts/build/build-land.mjs` | rebuild the landcover layer (water, green, pitches, parking) from OSM |
 | `python scripts/build/fetch-satellite.py` | re-stitch the satellite image |
 
 See `docs/DATA_PIPELINE.md` for how each dataset is produced and
@@ -315,9 +336,11 @@ The honest list — what this build is *not*:
   (CA → 191 College Ave, MH → Bildner Center); a wrong guess displaces
   classes by ~150 m at most. BRT/EAS sections (8 meetings) are dropped
   with a warning.
-- 8 benign console errors at boot ("unmount a root while React was already
-  rendering") come from the pre-existing drei Html stop-label overlays;
-  the labels render correctly.
+- The console is clean at boot. Stop labels used to come from drei's `<Html>`
+  overlays, which logged 8 benign React errors; they are now projected by the
+  camera and drawn as plain DOM, so the messages are gone and the labels are
+  crisper. The single remaining message is three.js deprecating `THREE.Clock`
+  inside react-three-fiber — an upstream notice, not this app's.
 - The mind day runs 07:00–02:00; at 240× it finishes in ~5 real minutes.
   No day-restart button yet — reload the page.
 - Lateness model: 1-minute ticks + a 1–3 min diligence buffer ⇒ ~25% of
@@ -351,8 +374,10 @@ npm run build   # → dist/
 ```
 
 Host `dist/` on GitHub Pages, Netlify, Vercel or Cloudflare Pages (all free).
-The only runtime network call is the building-footprint fetch for the 3D
-extrusions (also from the free public ArcGIS endpoint).
+There are **no runtime network calls at all**: buildings come from the baked
+`places-v2.json` footprints, the ground is drawn from baked geometry and OSM
+data, and the interface fonts are bundled as woff2 by Fontsource. Open the
+build with the network switched off and it still works.
 
 ## Docs
 

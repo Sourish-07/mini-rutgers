@@ -1,5 +1,47 @@
 @import 'tailwindcss';
 
+/* Type is bundled with the app (no CDN, no keys): a grotesk for the interface,
+   a mono for every number and micro-label — the data should read like
+   instrument output, not like a dashboard. */
+@import '@fontsource/space-grotesk/latin-400.css';
+@import '@fontsource/space-grotesk/latin-500.css';
+@import '@fontsource/space-grotesk/latin-600.css';
+@import '@fontsource/space-grotesk/latin-700.css';
+@import '@fontsource/ibm-plex-mono/latin-400.css';
+@import '@fontsource/ibm-plex-mono/latin-500.css';
+@import '@fontsource/ibm-plex-mono/latin-600.css';
+
+@theme {
+  --font-sans: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* ink — the operator console the map is read through */
+  --color-ink-950: #0a0d11;
+  --color-ink-900: #101419;
+  --color-ink-850: #161b22;
+  --color-ink-800: #1d232c;
+  --color-ink-700: #2b333e;
+  --color-ink-600: #3d4654;
+  --color-ink-500: #5b6674;
+  --color-ink-400: #808d9d;
+  --color-ink-300: #a9b4c0;
+  --color-ink-200: #cdd5de;
+  --color-ink-100: #e9eef3;
+
+  /* scarlet — Rutgers, and the app's only loud colour */
+  --color-scarlet-700: #8f0f22;
+  --color-scarlet-600: #b31126;
+  --color-scarlet-500: #cc0015;
+  --color-scarlet-400: #e5213a;
+  --color-scarlet-300: #ff5a6e;
+
+  --color-signal-live: #43d17f;
+  --color-signal-warn: #e8a33d;
+  --color-signal-cold: #5f9dc9;
+
+  --radius-panel: 3px;
+}
+
 html,
 body,
 #root {
@@ -8,16 +50,86 @@ body,
 }
 
 body {
-  font-family:
-    ui-sans-serif,
-    system-ui,
-    -apple-system,
-    'Helvetica Neue',
-    Arial,
-    sans-serif;
-  background: #cfe6f7;
+  font-family: var(--font-sans);
+  background: var(--color-ink-950);
+  color: var(--color-ink-100);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 * {
   box-sizing: border-box;
+}
+
+/* thin instrument scrollbars inside the docks */
+.dock::-webkit-scrollbar {
+  width: 6px;
+}
+.dock::-webkit-scrollbar-track {
+  background: transparent;
+}
+.dock::-webkit-scrollbar-thumb {
+  background: color-mix(in oklab, var(--color-ink-600) 70%, transparent);
+  border-radius: 3px;
+}
+.dock::-webkit-scrollbar-thumb:hover {
+  background: var(--color-ink-500);
+}
+
+/* the population sliders: a hairline track with a square scarlet grip */
+.slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 18px;
+  background: transparent;
+  cursor: pointer;
+}
+.slider::-webkit-slider-runnable-track {
+  height: 3px;
+  background: var(--color-ink-700);
+}
+.slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 10px;
+  height: 10px;
+  margin-top: -3.5px;
+  background: var(--color-scarlet-500);
+  border: 1px solid var(--color-ink-950);
+}
+.slider::-moz-range-track {
+  height: 3px;
+  background: var(--color-ink-700);
+}
+.slider::-moz-range-thumb {
+  width: 10px;
+  height: 10px;
+  border-radius: 0;
+  background: var(--color-scarlet-500);
+  border: 1px solid var(--color-ink-950);
+}
+
+/* map labels drawn as DOM over the canvas */
+.map-label {
+  position: absolute;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  color: var(--color-ink-100);
+  background: color-mix(in oklab, var(--color-ink-950) 88%, transparent);
+  border: 1px solid color-mix(in oklab, var(--color-ink-100) 16%, transparent);
+  padding: 1px 5px 2px;
+  white-space: nowrap;
+  pointer-events: none;
+  transform: translate(-50%, calc(-100% - 10px));
+}
+.map-label::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -9px;
+  width: 1px;
+  height: 9px;
+  background: color-mix(in oklab, var(--color-ink-100) 30%, transparent);
 }

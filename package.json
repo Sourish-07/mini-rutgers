@@ -11,7 +11,7 @@
     "check:layout": "node scripts/check/check-layout.mjs",
     "check:sim": "node scripts/check/check-sim.mjs",
     "check:mind": "node scripts/check/check-mind.mjs",
-    "build:data": "node scripts/build/build-places-v2.mjs && node scripts/build/build-schedule.mjs && node scripts/build/build-streets.mjs && node scripts/build/build-baseline.mjs",
+    "build:data": "node scripts/build/build-places-v2.mjs && node scripts/build/build-land.mjs && node scripts/build/build-schedule.mjs && node scripts/build/build-streets.mjs && node scripts/build/build-baseline.mjs",
     "format": "prettier --write src scripts",
     "format:check": "prettier --check src scripts"
   },
@@ -20,7 +20,6 @@
     "@react-three/fiber": "^9.8.2",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "recharts": "^3.10.1",
     "three": "^0.186.1"
   },
   "devDependencies": {

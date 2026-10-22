@@ -1,11 +1,20 @@
-import { useEffect, useMemo, useRef, useState, memo } from 'react'
+/**
+ * The scene.
+ *
+ * Everything here is a projection of engine state: the ground is vector
+ * geometry drawn from OSM, the buildings are the real Rutgers footprints baked
+ * into `places-v2.json` (no runtime fetch — the app works offline), the buses
+ * are driven along their own route loops, and the crowds are blocky instanced
+ * figures that walk.
+ */
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
-import { Html, OrbitControls } from '@react-three/drei'
+import { OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
-import { FRAME } from './ground'
-import satelliteUrl from '../data/satellite.jpg'
-import { ROUTES, STOPS, type Agent, type Bus, type Sim } from '../engine/sim'
-import { figureTextures, FIGURE_ASPECT, POSES, VARIANTS } from './atlas'
+import { FRAME, GROUND, grassTexture, landcoverGeometry, roadGeometry, routeGeometry } from './ground'
+import PLACES_DATA from '../data/places-v2.json'
+import { STOPS, type Agent, type Bus, type Sim } from '../engine/sim'
+import { SKIN, PANTS, pickColour, useCrowd, type FigurePose } from './people'
 import { MindPeople, Barriers, SelectionMarker, Trucks } from './mindScene'
 import type { Mind } from '../engine/mind/engine.ts'
 
@@ -14,80 +23,99 @@ const M = 50
 /** metres -> scene units */
 export const m = (metres: number) => metres / M
 
-const BUILDINGS_URL =
-  'https://services1.arcgis.com/ze0XBzU1FXj94DJq/arcgis/rest/services/Rutgers_University_Buildings/FeatureServer/0/query' +
-  '?where=1%3D1&outFields=BldgName,Category,District&outSR=4326&f=geojson&geometryPrecision=6'
-const CENTER = [40.5028, -74.447]
-const KX = 111320 * Math.cos((CENTER[0] * Math.PI) / 180)
-const KY = 110574
-const toUnit = (lat: number, lon: number): [number, number] => [
-  ((lon - CENTER[1]) * KX) / M,
-  (-(lat - CENTER[0]) * KY) / M,
-]
+/** what the map is drawn on: the designed vector ground, or the baked imagery */
+export type Imagery = 'designed' | 'satellite'
 
-type B = { ring: [number, number][]; h: number; colour: string }
+/* ------------------------------------------------------------------ campus */
 
-const CAT_COLOUR: Record<string, string> = {
-  Academic: '#b5654a',
-  Housing: '#c08a5a',
-  Administrative: '#9a6b52',
-  'Student Life': '#c2743f',
-  Athletic: '#7f9a5f',
-  Research: '#a05c46',
-  Healthcare: '#b06a6a',
-  Parking: '#9aa0a6',
+type Place = {
+  id: string
+  n: string
+  num?: string
+  cat: string
+  district: string
+  x: number
+  z: number
+  foot: [number, number][]
 }
 
-/** real Rutgers footprints, extruded from the ArcGIS ring geometry */
-function useCampus() {
-  const [data, setData] = useState<B[]>([])
-  useEffect(() => {
-    let dead = false
-    fetch(BUILDINGS_URL)
-      .then((r) => r.json())
-      .then((g) => {
-        if (dead) return
-        const out: B[] = []
-        for (const f of g.features ?? []) {
-          const ring: [number, number][] =
-            f.geometry?.type === 'Polygon' ? f.geometry.coordinates[0] : f.geometry?.coordinates?.[0]?.[0]
-          if (!ring || ring.length < 4) continue
-          // keep the true outline: a bounding box on a diagonal building spills onto the road
-          const pts = ring.map(([lon, lat]) => toUnit(lat, lon))
-          const area = Math.abs(
-            pts.reduce((a, [x, z], i) => {
-              const [nx, nz] = pts[(i + 1) % pts.length]
-              return a + (x * nz - nx * z)
-            }, 0) / 2,
-          )
-          if (area < m(8) * m(8)) continue
-          const cat = String(f.properties?.Category ?? '')
-          out.push({ ring: pts, h: m(3.6) * 3, colour: CAT_COLOUR[cat] ?? '#b8b1a4' })
-        }
-        setData(out)
-      })
-      .catch(() => setData([]))
-    return () => {
-      dead = true
-    }
-  }, [])
-  return data
+const PLACES = PLACES_DATA as unknown as Place[]
+
+/** storeys per category — real campus silhouettes, not one uniform slab */
+const STOREYS: Record<string, number> = {
+  Housing: 4,
+  Academic: 3,
+  Research: 4,
+  'Health Care': 3,
+  Administrative: 3,
+  'Information Center': 3,
+  'Student Life': 2,
+  Athletic: 2,
+  Agricultural: 2,
+  Storage: 1,
+  Utilities: 1,
+  Parking: 1,
 }
+
+/** muted clay and brick — the buildings sit on the map, they do not shout on it */
+const ROOF: Record<string, string> = {
+  Academic: '#a8735f',
+  Housing: '#b98a63',
+  Administrative: '#9c7261',
+  'Student Life': '#b5793f',
+  Athletic: '#7f9a6b',
+  Research: '#9a6a52',
+  'Health Care': '#a97676',
+  'Information Center': '#9aa4ad',
+  Parking: '#9aa0a4',
+  Utilities: '#8f939a',
+  Storage: '#a09a8c',
+  Agricultural: '#8aa063',
+}
+const ROOF_FALLBACK = '#b0a898'
+
+const STOREY_M = 3.6
+
+/* -------------------------------------------------------------- buildings */
+
+/** a soft blob so every building sits in its own light instead of hovering */
+let blobTex: THREE.Texture | null = null
+function shadowBlob(): THREE.Texture {
+  if (blobTex) return blobTex
+  const s = 128
+  const canvas = document.createElement('canvas')
+  canvas.width = canvas.height = s
+  const ctx = canvas.getContext('2d')!
+  const g = ctx.createRadialGradient(s / 2, s / 2, s * 0.18, s / 2, s / 2, s * 0.5)
+  g.addColorStop(0, 'rgba(24,32,20,0.42)')
+  g.addColorStop(0.65, 'rgba(24,32,20,0.20)')
+  g.addColorStop(1, 'rgba(24,32,20,0)')
+  ctx.fillStyle = g
+  ctx.fillRect(0, 0, s, s)
+  const t = new THREE.CanvasTexture(canvas)
+  t.colorSpace = THREE.SRGBColorSpace
+  blobTex = t
+  return t
+}
+
+type Block = { x: number; z: number; w: number; d: number }
 
 /**
- * Buildings are extruded from their real footprints — roof triangulated from the
- * ring, walls raised along every edge. This is the whole point of keeping the
- * polygon: a bounding box would cover the street the building sits beside.
+ * Real footprints, extruded: roof triangulated from the ring, walls raised along
+ * every edge, plus a thin roof outline. A bounding box would cover the street the
+ * building sits beside, which is why the polygon is carried all the way here.
  */
-function Buildings({ data }: { data: B[] }) {
-  const geom = useMemo(() => {
+function Buildings() {
+  const { solid, outline, blocks } = useMemo(() => {
     const pos: number[] = []
     const col: number[] = []
+    const edge: number[] = []
+    const blocks: Block[] = []
     const c = new THREE.Color()
 
-    for (const b of data) {
-      const ring = b.ring.slice()
-      // three's triangulator wants a CCW contour
+    for (const p of PLACES) {
+      const ring = p.foot
+      if (!ring || ring.length < 4) continue
       let area = 0
       for (let i = 0; i < ring.length; i++) {
         const [x, z] = ring[i]
@@ -97,94 +125,243 @@ function Buildings({ data }: { data: B[] }) {
       const contour = (area < 0 ? ring.slice().reverse() : ring).map(([x, z]) => new THREE.Vector2(x, z))
       if (contour.length < 3) continue
 
-      const faces = THREE.ShapeUtils.triangulateShape(contour, [])
-      c.set(b.colour)
-      const rooC = [c.r * 1.08, c.g * 1.08, c.b * 1.08]
-      const wallC = [c.r * 0.86, c.g * 0.86, c.b * 0.88]
+      const storeys = (STOREYS[p.cat] ?? 2) + (hash(p.id) % 2)
+      const h = m(STOREY_M) * storeys
+      c.set(ROOF[p.cat] ?? ROOF_FALLBACK)
+      const roof = [c.r * 1.02, c.g * 1.01, c.b * 0.98]
+      const wall = [c.r * 0.84, c.g * 0.83, c.b * 0.88]
 
+      let faces: number[][]
+      try {
+        faces = THREE.ShapeUtils.triangulateShape(contour, [])
+      } catch {
+        continue
+      }
       for (const f of faces) {
-        for (const idx of f) {
-          const v = contour[idx]
-          pos.push(v.x, b.h, v.y)
-          col.push(rooC[0], rooC[1], rooC[2])
+        for (const i of f) {
+          const v = contour[i]
+          pos.push(v.x, h, v.y)
+          col.push(roof[0], roof[1], roof[2])
         }
       }
       for (let i = 0; i < contour.length; i++) {
         const a = contour[i]
-        const d = contour[(i + 1) % contour.length]
-        pos.push(a.x, 0, a.y, d.x, 0, d.y, d.x, b.h, d.y)
-        pos.push(a.x, 0, a.y, d.x, b.h, d.y, a.x, b.h, a.y)
-        for (let k = 0; k < 6; k++) col.push(wallC[0], wallC[1], wallC[2])
+        const b = contour[(i + 1) % contour.length]
+        pos.push(a.x, 0, a.y, b.x, 0, b.y, b.x, h, b.y)
+        pos.push(a.x, 0, a.y, b.x, h, b.y, a.x, h, a.y)
+        for (let k = 0; k < 6; k++) col.push(wall[0], wall[1], wall[2])
+        edge.push(a.x, h + 0.004, a.y, b.x, h + 0.004, b.y)
       }
+
+      // bounding box of the ring, for the ground shadow
+      let x0 = Infinity
+      let x1 = -Infinity
+      let z0 = Infinity
+      let z1 = -Infinity
+      for (const [x, z] of contour) {
+        x0 = Math.min(x0, x)
+        x1 = Math.max(x1, x)
+        z0 = Math.min(z0, z)
+        z1 = Math.max(z1, z)
+      }
+      blocks.push({ x: (x0 + x1) / 2, z: (z0 + z1) / 2, w: x1 - x0, d: z1 - z0 })
     }
 
-    const g = new THREE.BufferGeometry()
-    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
-    g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3))
-    g.computeVertexNormals()
-    return g
-  }, [data])
+    const solid = new THREE.BufferGeometry()
+    solid.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
+    solid.setAttribute('color', new THREE.Float32BufferAttribute(col, 3))
+    solid.computeVertexNormals()
 
-  if (!data.length) return null
+    const outline = new THREE.BufferGeometry()
+    outline.setAttribute('position', new THREE.Float32BufferAttribute(edge, 3))
+
+    return { solid, outline, blocks }
+  }, [])
+
+  const shadows = useRef<THREE.InstancedMesh>(null)
+  useEffect(() => {
+    const mesh = shadows.current
+    if (!mesh) return
+    const dummy = new THREE.Object3D()
+    blocks.forEach((b, i) => {
+      dummy.position.set(b.x + 0.35, 0.02, b.z + 0.45)
+      dummy.rotation.set(-Math.PI / 2, 0, 0)
+      dummy.scale.set(b.w * 1.5, b.d * 1.5, 1)
+      dummy.updateMatrix()
+      mesh.setMatrixAt(i, dummy.matrix)
+    })
+    mesh.instanceMatrix.needsUpdate = true
+  }, [blocks])
+
   return (
-    <mesh geometry={geom}>
-      <meshStandardMaterial vertexColors roughness={0.85} side={THREE.DoubleSide} />
-    </mesh>
+    <group>
+      {blocks.length > 0 && (
+        <instancedMesh ref={shadows} args={[undefined, undefined, blocks.length]} renderOrder={2}>
+          <planeGeometry args={[1, 1]} />
+          <meshBasicMaterial map={shadowBlob()} transparent depthWrite={false} toneMapped={false} />
+        </instancedMesh>
+      )}
+      <mesh geometry={solid}>
+        <meshLambertMaterial vertexColors />
+      </mesh>
+      <lineSegments geometry={outline} renderOrder={3}>
+        <lineBasicMaterial color="#f4efe2" transparent opacity={0.5} />
+      </lineSegments>
+    </group>
   )
 }
 
-/** satellite imagery with the bus routes painted into the same canvas, so the
- *  lines are registered to the real ground by construction */
-function Ground() {
-  const tex = useMemo(() => {
-    const W = 3200
-    const H = Math.round((W * (FRAME.z1 - FRAME.z0)) / (FRAME.x1 - FRAME.x0))
-    const canvas = document.createElement('canvas')
-    canvas.width = W
-    canvas.height = H
-    const ctx = canvas.getContext('2d')!
-    ctx.fillStyle = '#93cf7c'
-    ctx.fillRect(0, 0, W, H)
+const hash = (s: string) => {
+  let h = 2166136261
+  for (let i = 0; i < s.length; i++) h = ((h ^ s.charCodeAt(i)) * 16777619) >>> 0
+  return h
+}
 
-    const px = (x: number) => ((x - FRAME.x0) / (FRAME.x1 - FRAME.x0)) * W
-    const py = (z: number) => ((z - FRAME.z0) / (FRAME.z1 - FRAME.z0)) * H
+/* ---------------------------------------------------------------- the map */
 
-    const paintRoutes = () => {
-      ctx.lineJoin = 'round'
-      ctx.lineCap = 'round'
-      const W_ROUTE = W * 0.0022
-      for (const pass of [0, 1]) {
-        for (const r of ROUTES) {
-          ctx.strokeStyle = pass === 0 ? 'rgba(0,0,0,0.55)' : r.colour
-          ctx.lineWidth = pass === 0 ? W_ROUTE + 4 : W_ROUTE
-          ctx.beginPath()
-          ctx.moveTo(px(r.path[0][0]), py(r.path[0][1]))
-          for (let i = 1; i < r.path.length; i++) ctx.lineTo(px(r.path[i][0]), py(r.path[i][1]))
-          ctx.stroke()
-        }
-      }
+/** the four landcover sheets, bottom to top, then the roads over them */
+function Ground({ imagery }: { imagery: Imagery }) {
+  const designed = imagery === 'designed'
+  const grass = useMemo(() => grassTexture(), [])
+  const land = useMemo(
+    () => ({
+      green: landcoverGeometry('green'),
+      pitch: landcoverGeometry('pitch'),
+      paved: landcoverGeometry('paved'),
+      water: landcoverGeometry('water'),
+    }),
+    [],
+  )
+  const roads = useMemo(() => roadGeometry(), [])
+  const routes = useMemo(() => routeGeometry(), [])
+
+  // The aerial layer is a 5 MB photograph and most sessions never switch to it,
+  // so it is fetched on first use instead of riding in the initial load.
+  const [aerial, setAerial] = useState<THREE.Texture | null>(null)
+  useEffect(() => {
+    if (imagery !== 'satellite' || aerial) return
+    let dead = false
+    let tex: THREE.Texture | null = null
+    import('../data/satellite.jpg').then(({ default: url }) => {
+      if (dead) return
+      tex = new THREE.TextureLoader().load(url)
+      tex.colorSpace = THREE.SRGBColorSpace
+      tex.anisotropy = 8
+      setAerial(tex)
+    })
+    return () => {
+      dead = true
+      tex?.dispose()
     }
+  }, [imagery, aerial])
 
-    const t = new THREE.CanvasTexture(canvas)
-    t.colorSpace = THREE.SRGBColorSpace
-    t.anisotropy = 8
-    const img = new Image()
-    img.onload = () => {
-      ctx.drawImage(img, 0, 0, W, H)
-      paintRoutes()
-      t.needsUpdate = true
-    }
-    img.src = satelliteUrl
-    return t
-  }, [])
   const w = FRAME.x1 - FRAME.x0
   const h = FRAME.z1 - FRAME.z0
+  const cx = (FRAME.x0 + FRAME.x1) / 2
+  const cz = (FRAME.z0 + FRAME.z1) / 2
+
   return (
-    <mesh rotation-x={-Math.PI / 2} position={[(FRAME.x0 + FRAME.x1) / 2, 0, (FRAME.z0 + FRAME.z1) / 2]}>
-      <planeGeometry args={[w, h]} />
-      <meshBasicMaterial map={tex} toneMapped={false} />
-    </mesh>
+    <group>
+      <mesh rotation-x={-Math.PI / 2} position={[cx, 0, cz]}>
+        <planeGeometry args={[w, h]} />
+        <meshBasicMaterial map={designed ? grass : (aerial ?? grass)} toneMapped={false} />
+      </mesh>
+      {designed && (
+        <>
+          {(['green', 'pitch', 'paved', 'water'] as const).map((k) => (
+            <mesh key={k} geometry={land[k]} renderOrder={1}>
+              <meshBasicMaterial vertexColors toneMapped={false} />
+            </mesh>
+          ))}
+          <mesh geometry={roads} renderOrder={2}>
+            <meshBasicMaterial vertexColors toneMapped={false} />
+          </mesh>
+        </>
+      )}
+      <mesh geometry={routes} renderOrder={3}>
+        <meshBasicMaterial vertexColors toneMapped={false} />
+      </mesh>
+      <FrameBorder />
+    </group>
   )
+}
+
+/** a hairline around the mapped frame — it reads as a drawn board, not a crop */
+function FrameBorder() {
+  const geom = useMemo(() => {
+    const { x0, x1, z0, z1 } = FRAME
+    const y = 0.012
+    const pts = [x0, y, z0, x1, y, z0, x1, y, z0, x1, y, z1, x1, y, z1, x0, y, z1, x0, y, z1, x0, y, z0]
+    const g = new THREE.BufferGeometry()
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3))
+    return g
+  }, [])
+  return (
+    <lineSegments geometry={geom} renderOrder={9}>
+      <lineBasicMaterial color={GROUND.frame} transparent opacity={0.5} />
+    </lineSegments>
+  )
+}
+
+const MAJOR = new Set(['arc', 'bsc', 'livSc', 'cas', 'yard', 'redoak', 'hill', 'quads'])
+
+/** stops as small pieces of street furniture: a pad, a pole, a scarlet sign */
+function Stops() {
+  return (
+    <>
+      {Object.entries(STOPS).map(([k, s]) => (
+        <group key={k} position={[s.at[0], 0, s.at[1]]}>
+          <mesh rotation-x={-Math.PI / 2} position={[0, 0.045, 0]} renderOrder={4}>
+            <circleGeometry args={[m(4.2), 20]} />
+            <meshBasicMaterial color="#efe9d8" transparent opacity={0.5} toneMapped={false} />
+          </mesh>
+          <mesh rotation-x={-Math.PI / 2} position={[0, 0.05, 0]} renderOrder={4}>
+            <ringGeometry args={[m(4.2), m(4.9), 24]} />
+            <meshBasicMaterial
+              color={MAJOR.has(k) ? '#12161c' : '#6b7280'}
+              transparent
+              opacity={0.45}
+              toneMapped={false}
+            />
+          </mesh>
+          <mesh position={[m(3.4), m(1.6), 0]}>
+            <cylinderGeometry args={[m(0.14), m(0.14), m(3.2), 5]} />
+            <meshLambertMaterial color="#4a5260" />
+          </mesh>
+          <mesh position={[m(3.4), m(2.9), 0]}>
+            <boxGeometry args={[m(1.5), m(0.85), m(0.1)]} />
+            <meshLambertMaterial color="#cc0015" />
+          </mesh>
+          <mesh position={[m(3.4), m(1.95), 0]}>
+            <boxGeometry args={[m(0.16), m(0.55), m(0.16)]} />
+            <meshLambertMaterial color="#4a5260" />
+          </mesh>
+        </group>
+      ))}
+    </>
+  )
+}
+
+/* ------------------------------------------------------------------ buses */
+
+/** position at an arc-length distance along the loop */
+function atDistance(bus: Bus, distance: number): [number, number] {
+  const len = bus.route.len
+  const d = ((distance % len) + len) % len
+  const path = bus.route.path
+  let acc = 0
+  for (let i = 1; i < path.length; i++) {
+    const seg = Math.hypot(path[i][0] - path[i - 1][0], path[i][1] - path[i - 1][1])
+    if (acc + seg >= d) {
+      const t = (d - acc) / (seg || 1)
+      return [
+        path[i - 1][0] + (path[i][0] - path[i - 1][0]) * t,
+        path[i - 1][1] + (path[i][1] - path[i - 1][1]) * t,
+      ]
+    }
+    acc += seg
+  }
+  return path[path.length - 1]
 }
 
 function BusMesh({ bus, clock }: { bus: Bus; clock: { t: number } }) {
@@ -214,41 +391,48 @@ function BusMesh({ bus, clock }: { bus: Bus; clock: { t: number } }) {
       node.rotation.y = yaw.current
     }
   })
+
   const load = bus.riders.length / bus.capacity
   return (
     <group ref={g}>
-      <mesh rotation-x={-Math.PI / 2} position={[0, 0.02, 0]} renderOrder={2}>
-        <planeGeometry args={[m(13), m(4)]} />
-        <meshBasicMaterial color="#1f2937" transparent opacity={0.35} depthWrite={false} />
+      <mesh rotation-x={-Math.PI / 2} position={[0, 0.035, 0]} renderOrder={3}>
+        <planeGeometry args={[m(15), m(5.6)]} />
+        <meshBasicMaterial
+          map={shadowBlob()}
+          transparent
+          opacity={0.6}
+          depthWrite={false}
+          toneMapped={false}
+        />
       </mesh>
       <group scale={m(12) / 2.1}>
         {/* scarlet body reads from the air; the white roof band is what you see top-down */}
         <mesh position={[0, 0.42, 0]}>
           <boxGeometry args={[2.1, 0.44, 0.86]} />
-          <meshStandardMaterial color="#b3002d" roughness={0.5} />
+          <meshLambertMaterial color="#b3002d" />
         </mesh>
         <mesh position={[0, 0.66, 0]}>
           <boxGeometry args={[2.02, 0.06, 0.78]} />
-          <meshStandardMaterial color="#b3002d" roughness={0.6} />
+          <meshLambertMaterial color="#c81f3c" />
         </mesh>
         <mesh position={[0, 0.7, 0]}>
           <boxGeometry args={[1.98, 0.02, 0.18]} />
-          <meshStandardMaterial color="#f8f8f6" roughness={0.7} />
+          <meshLambertMaterial color="#f8f8f6" />
         </mesh>
         <mesh position={[0, 0.3, 0]}>
           <boxGeometry args={[2.12, 0.16, 0.88]} />
-          <meshStandardMaterial color="#7f0021" roughness={0.6} />
+          <meshLambertMaterial color="#7f0021" />
         </mesh>
         {[-1, 1].map((s) => (
           <mesh key={s} position={[0, 0.5, s * 0.435]}>
             <boxGeometry args={[1.82, 0.2, 0.02]} />
-            <meshStandardMaterial color="#1f2a37" roughness={0.15} metalness={0.5} />
+            <meshLambertMaterial color="#22303c" />
           </mesh>
         ))}
         {[-1, 1].map((e) => (
           <mesh key={e} position={[e * 1.045, 0.5, 0]}>
             <boxGeometry args={[0.02, 0.2, 0.74]} />
-            <meshStandardMaterial color="#1f2a37" roughness={0.15} metalness={0.5} />
+            <meshLambertMaterial color="#22303c" />
           </mesh>
         ))}
         {(
@@ -261,142 +445,98 @@ function BusMesh({ bus, clock }: { bus: Bus; clock: { t: number } }) {
         ).map(([x, z], i) => (
           <mesh key={i} position={[x, 0.13, z]} rotation-x={Math.PI / 2}>
             <cylinderGeometry args={[0.13, 0.13, 0.1, 12]} />
-            <meshStandardMaterial color="#111827" roughness={0.9} />
+            <meshLambertMaterial color="#141a20" />
           </mesh>
         ))}
       </group>
-      {/* a full bus turns its roof red: you can read load from the air */}
-      <mesh position={[0, m(3.4), 0]} rotation-x={-Math.PI / 2}>
-        <planeGeometry args={[m(11), m(2.4)]} />
-        <meshBasicMaterial color={load > 0.85 ? '#dc2626' : '#16a34a'} transparent opacity={0.85} />
+      {/* a full bus turns its roof band scarlet: load is readable from the air */}
+      <mesh position={[0, m(3.5), 0]} rotation-x={-Math.PI / 2} renderOrder={6}>
+        <planeGeometry args={[m(9), m(1.1)]} />
+        <meshBasicMaterial
+          color={load > 0.85 ? '#cc0015' : '#2f7d4f'}
+          transparent
+          opacity={0.85}
+          toneMapped={false}
+        />
       </mesh>
-      {load > 0 && <group />}
     </group>
   )
 }
 
-function atDistance(bus: Bus, distance: number): [number, number] {
-  const len = bus.route.len
-  const d = ((distance % len) + len) % len
-  const path = bus.route.path
-  let acc = 0
-  for (let i = 1; i < path.length; i++) {
-    const seg = Math.hypot(path[i][0] - path[i - 1][0], path[i][1] - path[i - 1][1])
-    if (acc + seg >= d) {
-      const t = (d - acc) / (seg || 1)
-      return [
-        path[i - 1][0] + (path[i][0] - path[i - 1][0]) * t,
-        path[i - 1][1] + (path[i][1] - path[i - 1][1]) * t,
-      ]
-    }
-    acc += seg
-  }
-  return path[path.length - 1]
-}
+/* ----------------------------------------------------------------- people */
 
 /**
- * Agents as sprite billboards. One instanced quad per (variant, pose); the pose
- * alternates while walking so legs swing: a painted figure reads at 8 px, a
- * capsule does not.
+ * Off-campus students: the background population the legacy engine drives. They
+ * ride the buses in, walk to their destination and walk home again, so only the
+ * ones on foot are drawn — riders are inside the bus mesh.
  */
 function People({ agents, clock, limit }: { agents: Agent[]; clock: { t: number }; limit: number }) {
   const { camera, size } = useThree()
-  const tex = useMemo(() => figureTextures(), [])
-  const refs = useRef<(THREE.InstancedMesh | null)[]>([])
-  const dummy = useMemo(() => new THREE.Object3D(), [])
+  const crowd = useCrowd({ max: agents.length })
+  const headings = useRef<number[]>([])
+  const list = useRef<FigurePose[]>([])
+  const pool = useMemo(
+    () =>
+      agents.map((a, i) => ({
+        index: a.id,
+        x: 0,
+        z: 0,
+        heading: 0,
+        moving: false,
+        phase: 0,
+        scale: 1,
+        shirt: new THREE.Color(a.col),
+        pants: new THREE.Color(pickColour(PANTS, i, 5)),
+        skin: new THREE.Color(pickColour(SKIN, i, 3)),
+      })),
+    [agents],
+  )
+
   useFrame(() => {
     const f = clock.t - Math.floor(clock.t)
-    const stride = Math.floor(clock.t * 8) % 2
-    // true scale when you're close, a legible 8 px minimum when you're not:
-    // a 1.75 m person is 3 px at campus zoom, which reads as nothing at all
     const zoom = (camera as THREE.OrthographicCamera).zoom || 1
-    const unitsAcross = size.height / zoom
-    const H = Math.max(m(1.75), unitsAcross * 0.017)
-    const W = H * FIGURE_ASPECT
-    const buckets: Agent[][] = Array.from({ length: VARIANTS * POSES.length }, () => [])
+    const detail = size.height / zoom < 34
+    const figures = list.current
+    figures.length = 0
     let drawn = 0
     for (const a of agents) {
       if (drawn >= limit) break // render cap — the engine still simulates everyone
-      if (a.state === 'ride') continue // bus riders ride inside the bus mesh
-      const moving = a.state === 'walk-stop' || a.state === 'walk-dest'
-      const pose = moving ? (stride ? 1 : 2) : 0
-      buckets[(a.id % VARIANTS) * POSES.length + pose].push(a)
+      if (a.state === 'ride') continue
+      const p = pool[a.id]
+      const dx = a.x - a.px
+      const dz = a.z - a.pz
+      if (dx || dz) headings.current[a.id] = Math.atan2(-dz, dx)
+      p.x = a.px + dx * f
+      p.z = a.pz + dz * f
+      p.heading = headings.current[a.id] ?? 0
+      p.moving = a.state === 'walk-stop' || a.state === 'walk-dest'
+      p.phase = (clock.t * 1.15 + a.id * 0.41) % 1
+      figures.push(p)
       drawn++
     }
-    for (let i = 0; i < buckets.length; i++) {
-      const mesh = refs.current[i]
-      if (!mesh) continue
-      const list = buckets[i]
-      for (let k = 0; k < list.length; k++) {
-        const a = list[k]
-        const x = a.px + (a.x - a.px) * f
-        const z = a.pz + (a.z - a.pz) * f
-        dummy.position.set(x, H / 2, z)
-        dummy.quaternion.copy(camera.quaternion)
-        dummy.scale.set(W, H, 1)
-        dummy.updateMatrix()
-        mesh.setMatrixAt(k, dummy.matrix)
-      }
-      const count = mesh.instanceMatrix.count
-      dummy.scale.set(0.00001, 0.00001, 1)
-      dummy.updateMatrix()
-      for (let k = list.length; k < count; k++) mesh.setMatrixAt(k, dummy.matrix)
-      mesh.instanceMatrix.needsUpdate = true
-      mesh.count = count
-    }
+    crowd.pose(figures, detail)
   })
 
-  return (
-    <>
-      {Array.from({ length: VARIANTS }, (_, v) =>
-        POSES.map((_, p) => (
-          <instancedMesh
-            key={`${v}-${p}`}
-            ref={(el) => {
-              refs.current[v * POSES.length + p] = el
-            }}
-            args={[undefined, undefined, agents.length]}
-            frustumCulled={false}
-            renderOrder={4}
-          >
-            <planeGeometry args={[1, 1]} />
-            <meshBasicMaterial
-              map={tex[v][p]}
-              transparent
-              alphaTest={0.25}
-              depthWrite={false}
-              toneMapped={false}
-            />
-          </instancedMesh>
-        )),
-      )}
-    </>
-  )
+  return crowd.element
 }
 
-const MAJOR = new Set(['arc', 'bsc', 'livSc', 'cas', 'yard', 'redoak', 'hill', 'quads'])
+/* ------------------------------------------------------------------ labels */
 
-function Stops() {
-  return (
-    <>
-      {Object.entries(STOPS).map(([k, s]) => (
-        <group key={k} position={[s.at[0], 0, s.at[1]]}>
-          <mesh rotation-x={-Math.PI / 2} position={[0, 0.045, 0]}>
-            <circleGeometry args={[m(4), 16]} />
-            <meshBasicMaterial color="#ffffff" transparent opacity={0.85} />
-          </mesh>
-          {MAJOR.has(k) && (
-            <Html position={[0, m(12), 0]} center zIndexRange={[10, 0]} style={{ pointerEvents: 'none' }}>
-              <div className="whitespace-nowrap rounded bg-white/85 px-1.5 py-0.5 text-[9px] font-semibold text-slate-700 shadow-sm">
-                {s.label}
-              </div>
-            </Html>
-          )}
-        </group>
-      ))}
-    </>
-  )
+export type ScreenLabel = { key: string; label: string; x: number; y: number }
+
+/** where the labeled stops land on screen, for the DOM overlay over the canvas */
+function projectLabels(camera: THREE.Camera, w: number, h: number): ScreenLabel[] {
+  const v = new THREE.Vector3()
+  const out: ScreenLabel[] = []
+  for (const [key, s] of Object.entries(STOPS)) {
+    if (!MAJOR.has(key)) continue
+    v.set(s.at[0], m(9), s.at[1]).project(camera)
+    out.push({ key, label: s.label, x: (v.x * 0.5 + 0.5) * w, y: (-v.y * 0.5 + 0.5) * h })
+  }
+  return out
 }
+
+/* ------------------------------------------------------------------ scene */
 
 export const Scene = memo(function Scene({
   sim,
@@ -406,32 +546,32 @@ export const Scene = memo(function Scene({
   focus,
   selected,
   onSelect,
-  onCamera,
   mindLimit,
   simLimit,
+  imagery,
+  onLabels,
 }: {
   sim: Sim
   mind: Mind
   clock: { t: number }
   speed: number
-  /** stop key to open on */
+  /** stop key the camera opens on */
   focus: string
   selected: number | null
   onSelect: (id: number) => void
-  onCamera?: (c: THREE.Camera) => void
-  /** max minded-student figures to draw (of the full cohort) */
+  /** max on-campus figures to draw (of the full cohort) */
   mindLimit: number
-  /** max commuter figures to draw (of the full transit population) */
+  /** max off-campus figures to draw (of the full transit population) */
   simLimit: number
+  imagery: Imagery
+  /** screen positions of the labeled stops, throttled — for the DOM overlay */
+  onLabels?: (labels: ScreenLabel[]) => void
 }) {
-  const { camera } = useThree()
-  const campus = useCampus()
-  useEffect(() => {
-    onCamera?.(camera)
-  }, [camera, onCamera])
+  const { camera, size } = useThree()
+  const labelClock = useRef(0)
 
-  // isometric view: 45° azimuth, ~45° elevation, north up. OrbitControls keeps pan
-  // and zoom but never tilts, so the angle stays fixed.
+  // one fixed isometric angle: 45° azimuth, ~45° elevation, north up. OrbitControls
+  // keeps pan and zoom but never tilts, so the view stays comparable all day.
   useEffect(() => {
     const t = STOPS[focus].at
     camera.up.set(0, 1, 0)
@@ -448,25 +588,35 @@ export const Scene = memo(function Scene({
     // absolute minutes — same tick, two conventions
     const rel = target - mind.START
     if (rel > mind.minute) mind.runTo(rel)
+
+    if (onLabels) {
+      labelClock.current += dt
+      if (labelClock.current > 0.1) {
+        labelClock.current = 0
+        onLabels(projectLabels(camera, size.width, size.height))
+      }
+    }
   }, -1)
 
   return (
     <>
-      <color attach="background" args={['#cfe8f7']} />
-      <hemisphereLight args={['#eaf6ff', '#6f9e58', 1.0]} />
+      <color attach="background" args={[GROUND.sky]} />
+      <hemisphereLight args={['#fdf7e8', '#8a9a72', 1.1]} />
       <ambientLight intensity={0.5} />
-      <directionalLight position={[60, 90, 50]} intensity={2.0} color="#fff6e5" />
-      <Ground />
+      <directionalLight position={[70, 110, 45]} intensity={1.45} color="#fff3dd" />
+
+      <Ground imagery={imagery} />
       <Stops />
-      <Buildings data={campus} />
+      <Buildings />
       {sim.buses.map((b, i) => (
         <BusMesh key={i} bus={b} clock={clock} />
       ))}
       <People agents={sim.agents} clock={clock} limit={simLimit} />
-      <MindPeople mind={mind} clock={clock} onSelect={onSelect} limit={mindLimit} />
+      <MindPeople mind={mind} clock={clock} onSelect={onSelect} selected={selected} limit={mindLimit} />
       <Barriers mind={mind} />
       <SelectionMarker mind={mind} selected={selected} clock={clock} />
       <Trucks mind={mind} />
+
       <OrbitControls
         makeDefault
         target={[STOPS[focus].at[0], 0, STOPS[focus].at[1]]}
@@ -476,8 +626,8 @@ export const Scene = memo(function Scene({
         enableDamping
         dampingFactor={0.12}
         mouseButtons={{ LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN }}
-        minZoom={5}
-        maxZoom={1400}
+        minZoom={6}
+        maxZoom={2200}
         zoomSpeed={2}
       />
     </>
